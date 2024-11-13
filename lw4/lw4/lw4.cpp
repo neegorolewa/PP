@@ -14,7 +14,7 @@ struct ThreadData
     int threadId;
     std::ofstream* logFile;
     std::chrono::high_resolution_clock::time_point startTime;
-    std::vector<std::chrono::milliseconds>* timestamps;
+    std::vector<std::chrono::high_resolution_clock::time_point>* timestamps;
 };
 
 DWORD WINAPI BlurImagePart(LPVOID lpParam)
@@ -22,21 +22,43 @@ DWORD WINAPI BlurImagePart(LPVOID lpParam)
     ThreadData* data = (ThreadData*)lpParam;
     cv::Mat roi = (*data->image)(cv::Range::all(), cv::Range(data->startCol, data->endCol));
 
-    auto startTime = std::chrono::high_resolution_clock::now();
 
-    for (int i = 0; i < 20; i++)
+    //for (int i = 0; i < 20; i++)
+    //{
+    //    cv::blur(roi, roi, cv::Size(5, 5));
+
+    //    auto endTime = std::chrono::high_resolution_clock::now();
+    //    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime);
+
+    //    //(*data->logFile) << "Thread " << data->threadId << " processed in " << duration << " ms" << std::endl;
+    //    data->timestamps->push_back(duration);
+
+    //}
+    
+
+    for (int y = 1; y < roi.rows - 1; ++y) 
     {
-        cv::blur(roi, roi, cv::Size(5, 5));
+        for (int x = 1; x < roi.cols - 1; ++x) 
+        {
 
-        auto endTime = std::chrono::high_resolution_clock::now();
-        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime);
+            cv::Rect pixels(x - 1, y - 1, 3, 3);
+            cv::Mat smallImage = roi(pixels);
 
-        //(*data->logFile) << "Thread " << data->threadId << " processed in " << duration << " ms" << std::endl;
-        data->timestamps->push_back(duration);
+            for (int i = 0; i < 100; i++)
+            {
+                cv::blur(smallImage, smallImage, cv::Size(3, 3));
+            }
 
+            smallImage.copyTo(roi(pixels));
+
+            auto endTime = std::chrono::high_resolution_clock::now();
+
+            //(*data->logFile) << "Thread " << data->threadId << " processed in " << duration << " ms" << std::endl;
+            data->timestamps->push_back(endTime);
+        }
     }
 
-    return 0;
+    ExitThread(0);
 }
 
 void ProcessImage(const std::string& inputPath, const std::string& outputPath, int numThreads, int numCores)
@@ -54,10 +76,11 @@ void ProcessImage(const std::string& inputPath, const std::string& outputPath, i
 
     std::vector<HANDLE> threads(numThreads);
     std::vector<ThreadData> threadData(numThreads);
-    std::vector<std::vector<std::chrono::milliseconds>> timestamps(numThreads);
+    std::vector<std::vector<std::chrono::high_resolution_clock::time_point>> timestamps(numThreads);
 
     std::ofstream logFile("processing_log.txt");
-    if (!logFile.is_open()) 
+
+    if (!logFile.is_open())
     {
         std::cerr << "Could not open log file for writing." << std::endl;
         return;
@@ -65,9 +88,9 @@ void ProcessImage(const std::string& inputPath, const std::string& outputPath, i
 
     auto startTime = std::chrono::high_resolution_clock::now();
 
-
     // Создание потоков для обработки каждой полосы
-    for (int i = 0; i < numThreads; ++i) {
+    for (int i = 0; i < numThreads; ++i) 
+    {
         threadData[i].image = &image;
         threadData[i].startCol = i * stripWidth;
         threadData[i].endCol = (i == numThreads - 1) ? width : (i + 1) * stripWidth;
@@ -78,6 +101,7 @@ void ProcessImage(const std::string& inputPath, const std::string& outputPath, i
         threadData[i].timestamps = &timestamps[i]; // Передаем вектор временных меток
 
         threads[i] = CreateThread(NULL, 0, BlurImagePart, &threadData[i], 0, NULL);
+
         if (threads[i] == NULL)
         {
             std::cerr << "Failed to create thread " << i << std::endl;
@@ -113,7 +137,7 @@ void ProcessImage(const std::string& inputPath, const std::string& outputPath, i
 
     for (const HANDLE& thread : threads)
     {
-        if (ResumeThread(thread) == static_cast<DWORD>(-1)) 
+        if (ResumeThread(thread) == static_cast<DWORD>(-1))
         {
             std::cerr << "Error: unable to resume thread" << std::endl;
             return;
@@ -129,15 +153,16 @@ void ProcessImage(const std::string& inputPath, const std::string& outputPath, i
         CloseHandle(threads[i]);
     }
 
-    auto endTime = std::chrono::high_resolution_clock::now();
-    auto totalDuration = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime).count();
+    /*auto endTime = std::chrono::high_resolution_clock::now();
+    auto totalDuration = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime).count();*/
 
-    for (int i = 0; i < numThreads; ++i) 
+    for (int i = 0; i < numThreads; ++i)
     {
-        for (const auto& duration : timestamps[i]) 
+        for (const auto& timestamp : timestamps[i])
         {
+            auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(timestamp - startTime).count();
             //запись в файлы
-            logFile << i << ' ' << duration.count() << std::endl;
+            logFile << i << ' ' << duration << std::endl;
         }
     }
 
